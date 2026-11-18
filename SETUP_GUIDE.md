@@ -34,3 +34,15 @@ Push notifications (needs Firebase + native Android code), online payment gatewa
 - Render FREE services sleep after 15 minutes idle; the first request then takes 30-60 seconds. Fix: use a paid instance, or add a free uptime monitor (UptimeRobot) that opens https://YOUR-URL/health every 5 minutes.
 - Put Supabase and the server in the SAME region, and choose a region close to your staff (for Pakistan, Singapore or Frankfurt are usually closest). Cross-region database calls are the next biggest cause of slowness.
 - Use the Supabase Session/Transaction pooler string in DATABASE_URL.
+
+## 8. Deploy on Netlify (free, no sleeping server)
+This project already contains `netlify.toml` and `netlify/functions/api.js`, so the same code runs as a Netlify Function.
+1. Upload the files to GitHub so that `package.json`, `netlify.toml`, `server.js`, `public/` and `netlify/` are in the REPOSITORY ROOT (not inside another folder). Do not upload `.env`.
+2. Netlify > Add new site > Import from GitHub > pick the repository. Leave Build command empty. Publish directory: `public` (netlify.toml sets this).
+3. Site configuration > Environment variables, add:
+   DATABASE_URL (Supabase "Transaction pooler" string, port 6543, with your DB password),
+   JWT_SECRET (long random text), SUPER_KEY (another random text),
+   ADMIN_EMAIL, ADMIN_PASSWORD, ADMIN_NAME, COMPANY_NAME.
+4. Deploys > Trigger deploy > Clear cache and deploy site.
+5. Open https://YOUR-SITE.netlify.app/health -> {"ok":1}. Then open the site root and sign in. Use the same https address in the Android app.
+Notes: Netlify free plan is credit-based, so watch usage. Functions stop after 10 seconds. Login rate-limit and caches are per function instance (weaker than on a single server).

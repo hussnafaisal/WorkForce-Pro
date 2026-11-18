@@ -2,14 +2,16 @@
 const { Pool, types } = require('pg'); const bcrypt = require('bcryptjs');
 types.setTypeParser(20, v => parseInt(v, 10)); // COUNT(*) as number
 if (!process.env.DATABASE_URL) { console.error('DATABASE_URL is required (your Supabase/Postgres connection string)'); process.exit(1); }
-const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: process.env.PGSSL === 'disable' ? false : { rejectUnauthorized: false }, max: 10, keepAlive: true, idleTimeoutMillis: 30000, connectionTimeoutMillis: 10000 });
+const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: process.env.PGSSL === 'disable' ? false : { rejectUnauthorized: false }, max: +(process.env.PG_POOL_MAX || 10), keepAlive: true, idleTimeoutMillis: 30000, connectionTimeoutMillis: 10000 });
 pool.on('error', e => console.error('pg pool error', e.message));
 const conv = s => { let i = 0; return s.replace(/\?/g, () => '$' + (++i)); };
 const mk = c => ({ all: async (s, ...p) => (await c.query(conv(s), p)).rows, get: async (s, ...p) => (await c.query(conv(s), p)).rows[0],
   run: async (s, ...p) => (await c.query(conv(s), p)).rowCount, ins: async (s, ...p) => (await c.query(conv(s) + ' RETURNING id', p)).rows[0].id });
 const base = mk(pool);
 async function tx(fn) { const c = await pool.connect(); try { await c.query('BEGIN'); const r = await fn(mk(c)); await c.query('COMMIT'); return r; } catch (e) { await c.query('ROLLBACK'); throw e; } finally { c.release(); } }
-async function init() { await pool.query(`
+async function init() {
+  if ((await pool.query("SELECT to_regclass('public.payslips') r")).rows[0].r) return; // already created
+  await pool.query(`
 CREATE TABLE IF NOT EXISTS companies(id SERIAL PRIMARY KEY, name TEXT NOT NULL, grace INTEGER DEFAULT 10, created TEXT, plan TEXT DEFAULT 'trial', trial_ends TEXT);
 CREATE TABLE IF NOT EXISTS users(id SERIAL PRIMARY KEY, company_id INTEGER NOT NULL REFERENCES companies(id), name TEXT NOT NULL, email TEXT UNIQUE NOT NULL, hash TEXT NOT NULL,
   role TEXT NOT NULL DEFAULT 'employee', dept TEXT DEFAULT 'General', title TEXT DEFAULT 'Staff', active INTEGER DEFAULT 1, policy TEXT DEFAULT 'office', shift_start TEXT DEFAULT '09:00',

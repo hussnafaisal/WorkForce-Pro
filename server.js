@@ -9,11 +9,11 @@ const app = express();
   a.push((req, res, next) => Promise.resolve(f(req, res, next)).catch(e => { console.error(e); if (!res.headersSent) res.status(500).json({ error: 'Server error' }); })); return o(...a); }; });
 app.use(helmet({ contentSecurityPolicy: false, crossOriginResourcePolicy: false }));
 app.use((req, res, next) => { res.set({ 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type,Authorization', 'Access-Control-Allow-Methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS' }); if (req.method === 'OPTIONS') return res.sendStatus(204); next(); });
-app.use(compression()); app.use(express.json({ limit: '100kb' })); app.use(express.static('public', { maxAge: '1d' }));
+if (!process.env.NETLIFY && !process.env.AWS_LAMBDA_FUNCTION_NAME) app.use(compression()); app.use(express.json({ limit: '100kb' })); app.use(express.static('public', { maxAge: '1d' }));
 const local = () => { const d = new Date(Date.now() + OFF * 60000).toISOString(); return { date: d.slice(0, 10), time: d.slice(11, 16) }; };
 const audit = (u, a) => { run('INSERT INTO audit(company_id,at,actor,action) VALUES(?,?,?,?)', u.cid, new Date().toISOString(), u.name, a).catch(e => console.error('audit', e.message)); }; // non-blocking
 // short-lived cache for user/company rows (cleared on every write) to avoid a DB round-trip per request
-const UC = new Map(), CC = new Map(), TTL = 15000;
+const UC = new Map(), CC = new Map(), TTL = +(process.env.CACHE_TTL_MS || 15000);
 const cached = async (m, k, f) => { const e = m.get(k), t = Date.now(); if (e && e.x > t) return e.v; const v = await f(); if (v) m.set(k, { v, x: t + TTL }); return v; };
 const getUser = id => cached(UC, id, () => get('SELECT * FROM users WHERE id=? AND active=1', id));
 const getCo = cid => cached(CC, cid, () => get('SELECT * FROM companies WHERE id=?', cid));
@@ -102,5 +102,8 @@ app.post('/api/corrections/:id/decision', mgr, async (req, res) => { const c = a
   await audit(req.u, (ok ? 'Approved' : 'Rejected') + ' correction #' + c.id); res.json({ ok: 1 }); });
 app.get('/api/audit', mgr, async (req, res) => res.json(await all('SELECT * FROM audit WHERE company_id=? ORDER BY id DESC LIMIT 200', req.u.cid)));
 app.get('/health', (q, r) => r.json({ ok: 1 }));
-init().then(seed).then(() => { app.locals.purge().catch(() => {}); setInterval(() => app.locals.purge().catch(() => {}), 864e5).unref();
-  app.listen(process.env.PORT || 3000, () => console.log('WorkForce Pro on :' + (process.env.PORT || 3000))); }).catch(e => { console.error('Startup failed:', e.message); process.exit(1); });
+const ready = init().then(seed).then(() => { app.locals.purge().catch(() => {}); });
+if (require.main === module) { // normal server (PC, Render, VPS)
+  ready.then(() => { setInterval(() => app.locals.purge().catch(() => {}), 864e5).unref();
+    app.listen(process.env.PORT || 3000, () => console.log('WorkForce Pro on :' + (process.env.PORT || 3000))); }).catch(e => { console.error('Startup failed:', e.message); process.exit(1); });
+} else { ready.catch(() => {}); app.locals.ready = ready; module.exports = app; } // used by the Netlify function
